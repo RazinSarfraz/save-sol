@@ -3,6 +3,7 @@
 
 ## Prerequisites
 
+- Node
 - Docker
 - Postgres
 - Redis
