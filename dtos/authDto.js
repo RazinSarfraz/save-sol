@@ -43,6 +43,14 @@ class AuthDTO {
 
     return {phone,code};
   }
+
+  static logout({phone}) {
+    if ( !phone) {
+      throw new Error("phone is required.");
+    }
+
+    return {phone};
+  }
 }
 
 module.exports = AuthDTO;

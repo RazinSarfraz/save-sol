@@ -1,7 +1,10 @@
 const bcrypt = require("bcrypt");
 const AuthDTO = require("../dtos/authDto");
 const { User } = require("../models");
+const jwt = require("jsonwebtoken");
 const Utils = require("../utils/utils");
+const redisClient = require("../db/redis");
+const { redisLoginToken } = require("../models/const");
 
 class UserService {
   async verifyNumber(userData) {
@@ -96,7 +99,7 @@ class UserService {
     };
   }
   async getUserDetails(data) {
-    const {phone } = AuthDTO.getUserDetails(data);
+    const { phone } = AuthDTO.getUserDetails(data);
 
     const user = await User.findOne({ where: { phone } });
     if (!user) {
@@ -108,6 +111,7 @@ class UserService {
     }
     return {
       message: "User Data Fetched successfully",
+      id: user.id,
       name: user.name,
       phone: user.phone,
     };
@@ -115,27 +119,62 @@ class UserService {
   async login(loginData) {
     const { phone, code } = AuthDTO.login(loginData); // Assuming this extracts phone and code from loginData
     const user = await User.findOne({ where: { phone: phone } });
-    
+
     if (!user) {
       throw new Error("User not found.");
     }
-    
+
     if (!user.is_verified) {
       throw new Error("User not verified.");
     }
-    
+
     // Compare the provided code with the hashed code stored in the database
     const isCodeValid = await bcrypt.compare(code, user.pinCode);
-    
+
     if (!isCodeValid) {
       throw new Error("Invalid pin code.");
     }
-    
+
+    const token = jwt.sign(
+      { id: user.id, phone: user.phone },
+      process.env.JWT_SECRET,
+      { expiresIn: "5m" }
+    );
+    const redisKey = redisLoginToken + token;
+
+    await redisClient.set(phone, redisKey, { EX: 300 });
+
     return {
       message: "Login successfully",
       name: user.name,
       phone: user.phone,
+      token: token,
     };
+  }
+
+  async logout(logoutData) {
+    const { phone } = AuthDTO.logout(logoutData); // Assuming this extracts phone and code from loginData
+    const user = await User.findOne({ where: { phone: phone } });
+
+    if (!user) {
+      throw new Error("User not found.");
+    }
+
+    if (!user.is_verified) {
+      throw new Error("User not verified.");
+    }
+
+    // Check if the user exists in Redis
+    const storedToken = await redisClient.get(phone);
+
+    if (!storedToken) {
+      throw new Error("User is not logged in or already logged out.");
+    }
+
+    // Remove token from Redis
+    await redisClient.del(phone);
+
+    return { message: "Logout successful" };
   }
 }
 
