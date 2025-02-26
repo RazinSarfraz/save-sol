@@ -95,6 +95,48 @@ class UserService {
       phone: user.phone,
     };
   }
+  async getUserDetails(data) {
+    const {phone } = AuthDTO.getUserDetails(data);
+
+    const user = await User.findOne({ where: { phone } });
+    if (!user) {
+      throw new Error("User not found.");
+    }
+
+    if (!user.is_verified) {
+      throw new Error("User not verified.");
+    }
+    return {
+      message: "User Data Fetched successfully",
+      name: user.name,
+      phone: user.phone,
+    };
+  }
+  async login(loginData) {
+    const { phone, code } = AuthDTO.login(loginData); // Assuming this extracts phone and code from loginData
+    const user = await User.findOne({ where: { phone: phone } });
+    
+    if (!user) {
+      throw new Error("User not found.");
+    }
+    
+    if (!user.is_verified) {
+      throw new Error("User not verified.");
+    }
+    
+    // Compare the provided code with the hashed code stored in the database
+    const isCodeValid = await bcrypt.compare(code, user.pinCode);
+    
+    if (!isCodeValid) {
+      throw new Error("Invalid pin code.");
+    }
+    
+    return {
+      message: "Login successfully",
+      name: user.name,
+      phone: user.phone,
+    };
+  }
 }
 
 module.exports = new UserService();

@@ -9,4 +9,4 @@ class Utils {
     }
 }
 
-module.exports = new Utils(); // Exporting as a singleton
+module.exports = new Utils();

@@ -29,6 +29,20 @@ class AuthDTO {
     }
     return { name, code, phone };
   }
+  static getUserDetails({phone}) {
+    if ( !phone) {
+      throw new Error("phone is required.");
+    }
+
+    return {phone };
+  }
+  static login({phone,code}) {
+    if ( !phone || !code) {
+      throw new Error("phone,code is required.");
+    }
+
+    return {phone,code};
+  }
 }
 
 module.exports = AuthDTO;

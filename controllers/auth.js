@@ -12,6 +12,7 @@ class AuthController {
     }
   }
   
+
   async verifyRegisterOTP(req, res) {
     try {
       const otpData = authDTO.VerifyOTP(req.body);
@@ -36,6 +37,26 @@ class AuthController {
     try {
       const userData = authDTO.UserDetails(req.body);
       const result = await authService.addUserDetails(userData);
+      return res.status(201).json(result);
+    } catch (error) {
+      return res.status(400).json({ error: error.message });
+    }
+  }
+  async getUserDetails(req, res) {
+    try {
+      const userData = authDTO.getUserDetails(req.params);
+
+      const result = await authService.getUserDetails(userData);
+      return res.status(201).json(result);
+    } catch (error) {
+      return res.status(400).json({ error: error.message });
+    }
+  }
+  async login(req, res) {
+    try {
+      const loginData = authDTO.login(req.body);
+
+      const result = await authService.login(loginData);
       return res.status(201).json(result);
     } catch (error) {
       return res.status(400).json({ error: error.message });
