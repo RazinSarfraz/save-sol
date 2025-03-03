@@ -15,6 +15,15 @@ const verifyLoginToken = async (req, res, next) => {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     req.user = decoded;
 
+    // Extract phone number from path variable
+    const { phone } = req.params;
+
+    // Ensure the token belongs to the correct user
+    if (!phone || phone !== req.user.phone) {
+      return res.status(401).json({ error: "Unauthorized: Invalid token" });
+    }
+
+    
     // Check token in Redis
     const redisKey = redisLoginToken + token;
     const storedToken = await redisClient.get(req.user.phone);
