@@ -1,73 +1,51 @@
 const bcrypt = require("bcrypt");
 const AuthDTO = require("../dtos/authDto");
-const { User } = require("../models");
 const jwt = require("jsonwebtoken");
 const Utils = require("../utils/utils");
 const redisClient = require("../db/redis");
 const { redisLoginToken } = require("../models/const");
+const { ERRORS } = require("../utils/response");
+const userRepository = require("../repository/user");
 
 class UserService {
   async verifyNumber(userData) {
     const { phone } = AuthDTO.VerifyNumber(userData);
 
-    const existingUserPhone = await User.findOne({ where: { phone } });
+    const existingUserPhone = await userRepository.findByPhone(phone);
     if (existingUserPhone) {
-      throw new Error("User with this phone already exists.");
+      throw new Error(ERRORS.USER_ALREADY_EXISTS);
     }
-
-    // Hash password before saving
 
     const otp = Utils.generateRandomNumber();
     const hashedOTP = await bcrypt.hash(otp, 10);
 
-    const newUser = await User.create({
-      phone,
-      otp: hashedOTP,
-    });
+    const newUser = await userRepository.createUser({ phone, otp: hashedOTP });
 
-    return {
-      id: newUser.id,
-      phone: newUser.phone,
-      otp: otp,
-    };
+    return { id: newUser.id, phone: newUser.phone, otp: otp };
   }
 
   async verifyOTP(otpData) {
     const { otp, phone } = AuthDTO.VerifyOTP(otpData);
 
-    const user = await User.findOne({ where: { phone } });
-    if (!user) {
-      throw new Error("User not found.");
-    }
+    const user = await userRepository.findByPhone(phone);
+    if (!user) throw new Error(ERRORS.USER_NOT_FOUND);
 
     const isMatch = await bcrypt.compare(otp, user.otp);
-    if (!isMatch) {
-      throw new Error("Invalid OTP.");
-    }
+    if (!isMatch) throw new Error(ERRORS.INVALID_OTP);
 
-    user.is_verified = true;
-    user.otp = null;
-    await user.save();
-
-    return { message: "User verified successfully." };
+    await userRepository.updateUser(phone, { is_verified: true, otp: null });
   }
 
   async resendOTP(otpData) {
     const { phone } = AuthDTO.ResendOTP(otpData);
 
-    const user = await User.findOne({ where: { phone } });
-    if (!user) {
-      throw new Error("User not found.");
-    }
-
-    if (user.is_verified) {
-      throw new Error("User already verified.");
-    }
+    const user = await userRepository.findByPhone(phone);
+    if (!user) throw new Error(ERRORS.USER_NOT_FOUND);
+    if (user.is_verified) throw new Error(ERRORS.USER_ALREADY_REGISTERED);
 
     const otp = Utils.generateRandomNumber();
     const hashedOTP = await bcrypt.hash(otp, 10);
-
-    await user.update({ otp: hashedOTP });
+    await userRepository.updateUser(phone, { otp: hashedOTP });
 
     return { phone, otp };
   }
@@ -75,106 +53,64 @@ class UserService {
   async addUserDetails(otpData) {
     const { name, code, phone } = AuthDTO.UserDetails(otpData);
 
-    const user = await User.findOne({ where: { phone } });
-    if (!user) {
-      throw new Error("User not found.");
-    }
-
-    if (!user.is_verified) {
-      throw new Error("User not verified.");
-    }
-
-    if (user.is_enabled) {
-      throw new Error("User already registered.");
-    }
+    const user = await userRepository.findByPhone(phone);
+    if (!user) throw new Error(ERRORS.USER_NOT_FOUND);
+    if (!user.is_verified) throw new Error(ERRORS.USER_NOT_VERIFIED);
+    if (user.is_enabled) throw new Error(ERRORS.USER_ALREADY_REGISTERED);
 
     const hashedCode = await bcrypt.hash(code, 10);
+    await userRepository.updateUser(phone, {
+      pinCode: hashedCode,
+      name: name,
+      is_enabled: true,
+    });
 
-    await user.update({ pinCode: hashedCode, name: name, is_enabled: true });
-
-    return {
-      message: "User registered successfully",
-      name: user.name,
-      phone: user.phone,
-    };
+    return { name, phone };
   }
+
   async getUserDetails(data) {
     const { phone } = AuthDTO.getUserDetails(data);
 
-    const user = await User.findOne({ where: { phone } });
-    if (!user) {
-      throw new Error("User not found.");
-    }
+    const user = await userRepository.findByPhone(phone);
+    if (!user) throw new Error(ERRORS.USER_NOT_FOUND);
+    if (!user.is_verified) throw new Error(ERRORS.USER_NOT_VERIFIED);
 
-    if (!user.is_verified) {
-      throw new Error("User not verified.");
-    }
-    return {
-      message: "User Data Fetched successfully",
-      id: user.id,
-      name: user.name,
-      phone: user.phone,
-    };
+    return { id: user.id, name: user.name, phone: user.phone };
   }
+
   async login(loginData) {
-    const { phone, code } = AuthDTO.login(loginData); // Assuming this extracts phone and code from loginData
-    const user = await User.findOne({ where: { phone: phone } });
+    const { phone, code } = AuthDTO.login(loginData);
+    const user = await userRepository.findByPhone(phone);
 
-    if (!user) {
-      throw new Error("User not found.");
-    }
+    if (!user) throw new Error(ERRORS.USER_NOT_FOUND);
+    if (!user.is_verified) throw new Error(ERRORS.USER_NOT_VERIFIED);
 
-    if (!user.is_verified) {
-      throw new Error("User not verified.");
-    }
-
-    // Compare the provided code with the hashed code stored in the database
     const isCodeValid = await bcrypt.compare(code, user.pinCode);
-
-    if (!isCodeValid) {
-      throw new Error("Invalid pin code.");
-    }
+    if (!isCodeValid) throw new Error(ERRORS.INVALID_PIN_CODE);
 
     const token = jwt.sign(
       { id: user.id, phone: user.phone },
       process.env.JWT_SECRET,
-      { expiresIn: "5m" }
+      { expiresIn: process.env.LOGIN_TOKEN_EXPIRATION_TIME }
     );
-    const redisKey = redisLoginToken + token;
 
+    const redisKey = redisLoginToken + token;
     await redisClient.set(phone, redisKey, { EX: 300 });
 
-    return {
-      message: "Login successfully",
-      name: user.name,
-      phone: user.phone,
-      token: token,
-    };
+    return { name: user.name, phone: user.phone, token: token };
   }
 
   async logout(logoutData) {
-    const { phone } = AuthDTO.logout(logoutData); // Assuming this extracts phone and code from loginData
-    const user = await User.findOne({ where: { phone: phone } });
+    const { phone } = AuthDTO.logout(logoutData);
+    const user = await userRepository.findByPhone(phone);
 
-    if (!user) {
-      throw new Error("User not found.");
-    }
+    if (!user) throw new Error(ERRORS.USER_NOT_FOUND);
+    if (!user.is_verified) throw new Error(ERRORS.USER_NOT_VERIFIED);
 
-    if (!user.is_verified) {
-      throw new Error("User not verified.");
-    }
-
-    // Check if the user exists in Redis
     const storedToken = await redisClient.get(phone);
+    if (!storedToken) throw new Error(ERRORS.NOT_LOGGED_IN);
 
-    if (!storedToken) {
-      throw new Error("User is not logged in or already logged out.");
-    }
-
-    // Remove token from Redis
     await redisClient.del(phone);
-
-    return { message: "Logout successful" };
   }
 }
 
